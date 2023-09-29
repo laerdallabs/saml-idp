@@ -422,6 +422,7 @@ function _runServer(argv) {
     profileMapper:          SimpleProfileMapper.fromMetadata(argv.config.metadata),
     postEndpointPath:       IDP_PATHS.SSO,
     redirectEndpointPath:   IDP_PATHS.SSO,
+    wantAuthnRequestsSigned: argv.wantAuthnRequestsSigned,
     logoutEndpointPaths:    argv.sloUrl ?
                             {
                               redirect: IDP_PATHS.SLO,
