@@ -158,6 +158,9 @@ function prettyPrintXml(xml, indent) {
   return prettyXml;
 }
 
+const defaultOptions = {
+"host":"localhost","disableRequestAcsUrl":false,"encryptAssertion":false,"signResponse":true,"rollSession":false,"authnContextClassRef":"urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
+};
 
 /**
  * Arguments
@@ -390,12 +393,13 @@ function _runServer(argv) {
       {cyan ${!argv.disableRequestAcsUrl}}
   `));
 
+  const loadOverrideConfig = argv.loadOverrideConfig;
 
   /**
    * IdP Configuration
    */
 
-  const idpOptions = {
+  const buildIdpOptions = (argv) => ({
     issuer:                 argv.issuer,
     serviceProviderId:      argv.serviceProviderId || argv.audience,
     cert:                   argv.cert,
@@ -423,6 +427,7 @@ function _runServer(argv) {
     postEndpointPath:       IDP_PATHS.SSO,
     redirectEndpointPath:   IDP_PATHS.SSO,
     wantAuthnRequestsSigned: argv.wantAuthnRequestsSigned,
+    displayName:            'Default',
     logoutEndpointPaths:    argv.sloUrl ?
                             {
                               redirect: IDP_PATHS.SLO,
@@ -466,7 +471,7 @@ function _runServer(argv) {
                                 RelayState: opts.RelayState
                               });
                             }
-  }
+  });
 
   /**
    * App Environment
@@ -546,7 +551,9 @@ function _runServer(argv) {
       metadata: req.metadata,
       authnRequest: req.authnRequest,
       idp: req.idp.options,
-      paths: IDP_PATHS
+      paths: Object.fromEntries(Object.entries(IDP_PATHS).map(([key, value])=>[key, `/${req.params.config}${value}`])),
+      config: req.rawConfig,
+      rawConfig: JSON.stringify(req.rawConfig, null, 4)
     });
   }
 
@@ -634,21 +641,57 @@ function _runServer(argv) {
     }
   });
 
-  app.use(function(req, res, next){
-    req.user = argv.config.user;
-    req.metadata = argv.config.metadata;
-    req.idp = { options: idpOptions };
-    req.participant = getParticipant(req);
-    next();
+  const router = express.Router({
+    mergeParams: true
   });
 
-  app.get(['/', '/idp', IDP_PATHS.SSO], parseSamlRequest);
-  app.post(['/', '/idp', IDP_PATHS.SSO], parseSamlRequest);
+  app.use('/:config', router);
+  
+  router.use(function(req, res, next){
+    if (loadOverrideConfig && req.params.config !== 'default') {
+      const configPath = req.params.config;
+      try {
+        const config = loadOverrideConfig(configPath);
+        if (!config) {
+          return res.render('error', {
+            message: `Custom configs are enabled, but no config found for ${configPath}`
+          });
+        }
+        const args = processArgs([], config);
+        let override = buildIdpOptions(args.argv);
 
-  app.get(IDP_PATHS.SLO, parseLogoutRequest);
-  app.post(IDP_PATHS.SLO, parseLogoutRequest);
+        override.postEndpointPath = override.redirectEndpointPath = `/${configPath}`;
 
-  app.post(IDP_PATHS.SIGN_IN, function(req, res) {
+        req.user = args.argv.config.user;
+        req.metadata = args.argv.config.metadata;
+        req.idp = { options: override };
+        req.rawConfig = args.argv;
+        req.participant = getParticipant(req);
+        next();
+      } catch (err) {
+        return res.render('error', {
+          message: `Error loading config for ${configPath}`,
+          error: err
+        });
+      }
+    } else {
+      req.user = argv.config.user;
+      req.metadata = argv.config.metadata;
+      req.idp = { options: buildIdpOptions(argv) };
+      req.participant = getParticipant(req);
+      req.rawConfig = argv;
+    
+      next();
+    }
+  });
+
+  router.get(['/', '/idp', IDP_PATHS.SSO], parseSamlRequest);
+  router.post(['/', '/idp', IDP_PATHS.SSO], parseSamlRequest);
+
+  router.get(IDP_PATHS.SLO, parseLogoutRequest);
+  router.post(IDP_PATHS.SLO, parseLogoutRequest);
+
+  router.post(IDP_PATHS.SIGN_IN, function(req, res) {
     const authOptions = extend({}, req.idp.options);
     Object.keys(req.body).forEach(function(key) {
       var buffer;
@@ -693,11 +736,11 @@ function _runServer(argv) {
     samlp.auth(authOptions)(req, res);
   })
 
-  app.get(IDP_PATHS.METADATA, function(req, res, next) {
+  router.get(IDP_PATHS.METADATA, function(req, res, next) {
     samlp.metadata(req.idp.options)(req, res);
   });
 
-  app.post(IDP_PATHS.METADATA, function(req, res, next) {
+  router.post(IDP_PATHS.METADATA, function(req, res, next) {
     if (req.body && req.body.attributeName && req.body.displayName) {
       var attributeExists = false;
       const attribute = {
@@ -723,7 +766,7 @@ function _runServer(argv) {
     }
   });
 
-  app.get(IDP_PATHS.SIGN_OUT, function(req, res, next) {
+  router.get(IDP_PATHS.SIGN_OUT, function(req, res, next) {
     if (req.idp.options.sloUrl) {
       console.log('Initiating SAML SLO request for user: ' + req.user.userName +
       ' with sessionIndex: ' + getSessionIndex(req));
@@ -739,13 +782,13 @@ function _runServer(argv) {
     }
   });
 
-  app.get([IDP_PATHS.SETTINGS], function(req, res, next) {
+  router.get([IDP_PATHS.SETTINGS], function(req, res, next) {
     res.render('settings', {
       idp: req.idp.options
     });
   });
 
-  app.post([IDP_PATHS.SETTINGS], function(req, res, next) {
+  router.post([IDP_PATHS.SETTINGS], function(req, res, next) {
     Object.keys(req.body).forEach(function(key) {
       switch(req.body[key].toLowerCase()){
         case "true": case "yes": case "1":
