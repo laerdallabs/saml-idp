@@ -646,12 +646,19 @@ function _runServer(argv) {
   });
 
   app.use('/:config', router);
+
+  app.get('/', (req, res) => {
+    res.status(404);
+    return res.render('error', {
+      message: `Custom configs are enabled, a config path must be specified`
+    });
+  })
   
-  router.use(function(req, res, next){
+  router.use(async function(req, res, next){
     if (loadOverrideConfig && req.params.config !== 'default') {
       const configPath = req.params.config;
       try {
-        const config = loadOverrideConfig(configPath);
+        const config = await loadOverrideConfig(configPath);
         if (!config) {
           return res.render('error', {
             message: `Custom configs are enabled, but no config found for ${configPath}`
