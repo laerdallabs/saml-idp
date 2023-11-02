@@ -46,7 +46,7 @@ const WILDCARD_ADDRESSES = ['0.0.0.0', '::'];
 const UNDEFINED_VALUE = 'None';
 const CRYPT_TYPES = {
   certificate: /-----BEGIN CERTIFICATE-----[^-]*-----END CERTIFICATE-----/,
-  'RSA private key': /-----BEGIN RSA PRIVATE KEY-----\n[^-]*\n-----END RSA PRIVATE KEY-----/,
+  'RSA private key': /-----BEGIN RSA PRIVATE KEY-----\n[^-]*\n-----END RSA PRIVATE KEY-----|-----BEGIN PRIVATE KEY-----[^-]*-----END PRIVATE KEY-----/,
   'public key': /-----BEGIN PUBLIC KEY-----\n[^-]*\n-----END PUBLIC KEY-----/,
 };
 const KEY_CERT_HELP_TEXT = dedent(chalk`
@@ -165,13 +165,18 @@ const defaultOptions = {
 /**
  * Arguments
  */
-function processArgs(args, options) {
+function processArgs(args, options, runtime=false) {
   var baseArgv;
 
   if (options) {
     baseArgv = yargs(args).config(options);
   } else {
     baseArgv = yargs(args);
+  }
+
+  // If this is executed at runtime, we need to do some things differently
+  if (runtime) {
+    baseArgv.exitProcess(false);
   }
   return baseArgv
     .usage('\nSimple IdP for SAML 2.0 WebSSO & SLO Profile\n\n' +
@@ -427,6 +432,7 @@ function _runServer(argv) {
     postEndpointPath:       IDP_PATHS.SSO,
     redirectEndpointPath:   IDP_PATHS.SSO,
     wantAuthnRequestsSigned: argv.wantAuthnRequestsSigned,
+    allowCertWhitespace:    argv.allowCertWhitespace,
     displayName:            'Default',
     logoutEndpointPaths:    argv.sloUrl ?
                             {
@@ -664,7 +670,7 @@ function _runServer(argv) {
             message: `Custom configs are enabled, but no config found for ${configPath}`
           });
         }
-        const args = processArgs([], config);
+        const args = processArgs([], config, true);
         let override = buildIdpOptions(args.argv);
 
         override.postEndpointPath = override.redirectEndpointPath = `/${configPath}`;
@@ -744,7 +750,9 @@ function _runServer(argv) {
   })
 
   router.get(IDP_PATHS.METADATA, function(req, res, next) {
-    samlp.metadata(req.idp.options)(req, res);
+    samlp.metadata({
+      ...req.idp.options
+    })(req, res);
   });
 
   router.post(IDP_PATHS.METADATA, function(req, res, next) {
