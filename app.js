@@ -674,6 +674,10 @@ function _runServer(argv) {
     mergeParams: true
   });
 
+  app.get('/health', (req, res) => {
+    res.status(200).send('Mock IDP service is online!');
+  })
+
   app.use('/:config', router);
 
   app.get('/', (req, res) => {
