@@ -158,10 +158,6 @@ function prettyPrintXml(xml, indent) {
   return prettyXml;
 }
 
-const defaultOptions = {
-"host":"localhost","disableRequestAcsUrl":false,"encryptAssertion":false,"signResponse":true,"rollSession":false,"authnContextClassRef":"urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
-};
-
 /**
  * Arguments
  */
@@ -400,6 +396,32 @@ function _runServer(argv) {
 
   const loadOverrideConfig = argv.loadOverrideConfig;
 
+  const removeHeaders = function  (cert) {
+    var pem = /-----BEGIN (\w*)-----([^-]*)-----END (\w*)-----/g.exec(cert.toString());
+    if (pem && pem.length > 0) {
+      return pem[2].replace(/[\n|\r\n]/g, '');
+    }
+    return null;
+  };
+
+  function injectCertWhitespace(cert, body) {
+    const whitespaceSpacing = 64;
+    const pem = removeHeaders(cert);
+    let spacedPem = "";
+    let i = 0;
+    let substring;
+    do {
+      substring = pem.substring(i, i+whitespaceSpacing);
+      i+= whitespaceSpacing;
+      spacedPem += substring + `\n	
+      `;
+    }
+    while (substring.length > 0)
+
+    
+    return body.replaceAll(pem, spacedPem);
+  }
+
   /**
    * IdP Configuration
    */
@@ -432,7 +454,8 @@ function _runServer(argv) {
     postEndpointPath:       IDP_PATHS.SSO,
     redirectEndpointPath:   IDP_PATHS.SSO,
     wantAuthnRequestsSigned: argv.wantAuthnRequestsSigned,
-    allowCertWhitespace:    argv.allowCertWhitespace,
+    // This is a very specific whitespace edge case: https://blinemedical.atlassian.net/browse/SCLD-15133?focusedCommentId=81275
+    yaleMode:                argv.yaleMode,
     displayName:            'Default',
     logoutEndpointPaths:    argv.sloUrl ?
                             {
@@ -461,7 +484,7 @@ function _runServer(argv) {
                                 }
                               }
                             },
-    responseHandler:        function(response, opts, req, res, next) {
+    responseHandler:        function(response, opts, req, res) {
                               console.log(dedent(chalk`
                                 Sending SAML Response to {cyan ${opts.postUrl}} =>
                                   {bold RelayState} =>
@@ -659,6 +682,9 @@ function _runServer(argv) {
       message: `Custom configs are enabled, a config path must be specified`
     });
   })
+
+
+
   
   router.use(async function(req, res, next){
     if (loadOverrideConfig && req.params.config !== 'default') {
@@ -750,9 +776,17 @@ function _runServer(argv) {
   })
 
   router.get(IDP_PATHS.METADATA, function(req, res, next) {
+    if (req.idp.options.yaleMode) {
+      const originalSend = res.send;
+
+      res.send = function(){
+        arguments[0] = injectCertWhitespace(req.idp.options.cert, arguments[0]);
+        originalSend.apply(res, arguments);
+      };
+    }
     samlp.metadata({
       ...req.idp.options
-    })(req, res);
+    })(req, res, next);
   });
 
   router.post(IDP_PATHS.METADATA, function(req, res, next) {

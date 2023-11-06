@@ -36,7 +36,7 @@
     "extend": "^3.0.2",
     "hbs": "^4.2.0",
     "morgan": "^1.10.0",
-    "samlp": "github:laerdallabs/node-samlp#5c5adbf",
+    "samlp": "github:laerdallabs/node-samlp#802e13c",
     "xml-formatter": "^2.6.1",
     "yargs": "^17.5.1"
   }
